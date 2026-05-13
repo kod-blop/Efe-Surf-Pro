@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Efe Surf: Ultimate Edition</title>
+    <style>
+        :root { --neon: #00f2ff; --gold: #ffcc00; --shield: #ff00ff; --mag: #00ff00; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+        body { margin: 0; background: #000; color: white; font-family: 'Arial Black', sans-serif; overflow: hidden; position: fixed; width: 100%; height: 100%; }
+        
+        #game-stage { position: relative; width: 100vw; height: 100vh; perspective: 800px; overflow: hidden; background: linear-gradient(#001, #003); }
+
+        /* Dinamik 3D Yol */
+        #road {
+            position: absolute; width: 400px; height: 300%; bottom: -50%; left: 50%;
+            transform: translateX(-50%) rotateX(70deg); transform-origin: bottom;
+            background: repeating-linear-gradient(#222, #222 50px, #282828 50px, #282828 100px);
+            border-left: 8px solid var(--neon); border-right: 8px solid var(--neon);
+            box-shadow: 0 0 100px rgba(0,242,255,0.3);
+        }
+
+        /* Karakter */
+        #player {
+            position: absolute; width: 70px; height: 70px; font-size: 60px;
+            bottom: 100px; left: 50%; transform: translateX(-50%);
+            transition: left 0.15s cubic-bezier(0.18, 0.89, 0.32, 1.28), bottom 0.3s, transform 0.2s;
+            z-index: 100; display: flex; align-items: center; justify-content: center;
+        }
+
+        /* Objeler (Tren, Altın, Engel) */
+        .object { position: absolute; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; transition: opacity 0.2s; }
+        .train { width: 100px; height: 150px; background: linear-gradient(#333, #000); border: 3px solid #555; border-radius: 15px; font-size: 50px; }
+        .barrier { width: 100px; height: 40px; background: #f00; border: 4px solid #fff; border-radius: 5px; font-size: 20px; font-weight: bold; }
+        .coin { width: 35px; height: 35px; background: var(--gold); border-radius: 50%; box-shadow: 0 0 20px var(--gold); color: #000; font-size: 14px; border: 2px solid #fff; }
+        .powerup { width: 40px; height: 40px; border-radius: 10px; font-size: 25px; animation: pulse 0.5s infinite alternate; }
+
+        /* HUD (Arayüz) */
+        #hud { position: absolute; top: 40px; width: 100%; padding: 0 20px; display: flex; justify-content: space-between; font-size: 24px; z-index: 1000; text-shadow: 2px 2px #000; }
+        #footer { position: absolute; bottom: 10px; width: 100%; text-align: center; font-size: 12px; color: #444; letter-spacing: 4px; }
+
+        /* Hareket Durumları */
+        .jumping { bottom: 250px !important; }
+        .rolling { transform: translateX(-50%) scaleY(0.5) !important; bottom: 80px !important; }
+        @keyframes pulse { from { transform: translateX(-50%) scale(1); } to { transform: translateX(-50%) scale(1.2); } }
+    </style>
+</head>
+<body>
+
+    <div id="game-stage">
+        <div id="hud">
+            <div style="color:var(--gold)">💰 <span id="coins">0</span></div>
+            <div style="text-align: right;">🔥 <span id="score">0</span><br><small id="multiplier">x1</small></div>
+        </div>
+        
+        <div id="road"></div>
+        <div id="player">🏃</div>
+        <div id="footer">MADE BY YİĞİT EFE</div>
+    </div>
+
+<script>
+    let score = 0, coins = 0, mult = 1, isGameOver = false;
+    let currentLane = 1, isJumping = false, isRolling = false;
+    let objects = [], activePowerups = { mag: 0, shield: 0 };
+    const player = document.getElementById('player');
+    const stage = document.getElementById('game-stage');
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playSfx(f, t, d, v=0.1) {
+        if(audioCtx.state==='suspended') audioCtx.resume();
+        const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+        o.type=t; o.connect(g); g.connect(audioCtx.destination);
+        o.frequency.setValueAtTime(f, audioCtx.currentTime);
+        g.gain.setValueAtTime(v, audioCtx.currentTime);
+        o.start(); o.stop(audioCtx.currentTime+d);
+    }
+
+    let sX, sY;
+    stage.addEventListener('touchstart', e => { sX = e.touches[0].clientX; sY = e.touches[0].clientY; });
+    stage.addEventListener('touchend', e => {
+        let dX = e.changedTouches[0].clientX - sX;
+        let dY = e.changedTouches[0].clientY - sY;
+
+        if (Math.abs(dX) > Math.abs(dY)) {
+            if (dX > 40 && currentLane < 2) currentLane++;
+            else if (dX < -40 && currentLane > 0) currentLane--;
+            playSfx(500, 'sine', 0.05);
+        } else {
+            if (dY < -40 && !isJumping) {
+                isJumping = true; player.classList.add('jumping'); player.innerText = '🤸';
+                setTimeout(() => { player.classList.remove('jumping'); isJumping = false; player.innerText = '🏃'; }, 600);
+            } else if (dY > 40 && !isRolling) {
+                isRolling = true; player.classList.add('rolling'); player.innerText = '🌀';
+                setTimeout(() => { player.classList.remove('rolling'); isRolling = false; player.innerText = '🏃'; }, 500);
+            }
+        }
+        updatePos();
+    });
+
+    function updatePos() { player.style.left = (window.innerWidth / 3 * currentLane + window.innerWidth / 6) + 'px'; }
+    updatePos();
+
+    function spawn() {
+        if (isGameOver) return;
+        const lane = Math.floor(Math.random() * 3);
+        const typeNum = Math.random();
+        let type = 'train', icon = '🚈';
+
+        if (typeNum > 0.8) { type = 'coin'; icon = '🪙'; }
+        else if (typeNum > 0.75) { type = 'powerup mag'; icon = '🧲'; }
+        else if (typeNum > 0.7) { type = 'powerup shield'; icon = '🛡️'; }
+        else if (typeNum > 0.5) { type = 'barrier'; icon = '🚧'; }
+
+        const div = document.createElement('div');
+        div.className = `object ${type}`;
+        div.innerHTML = icon;
+        div.style.top = '-150px';
+        div.style.left = (window.innerWidth/3 * lane + window.innerWidth/6) + 'px';
+        stage.appendChild(div);
+        
+        objects.push({ div, lane, type, y: -150, speed: 7 + (score / 500) });
+        setTimeout(spawn, Math.max(300, 1000 - score / 10));
+    }
+
+    function update() {
+        if (isGameOver) return;
+        score += Math.floor(mult);
+        mult = 1 + (coins / 10);
+
+        objects.forEach((obj, i) => {
+            obj.y += obj.speed;
+            obj.div.style.top = obj.y + 'px';
+            const scale = 0.4 + (obj.y / window.innerHeight) * 1.6;
+            obj.div.style.transform = `translateX(-50%) scale(${scale})`;
+
+            if (activePowerups.mag > Date.now() && obj.type === 'coin') {
+                if (obj.y > 200) obj.lane = currentLane;
+                obj.div.style.left = (window.innerWidth/3 * obj.lane + window.innerWidth/6) + 'px';
+            }
+
+            if (obj.lane === currentLane && obj.y > window.innerHeight - 180 && obj.y < window.innerHeight - 80) {
+                if (obj.type.includes('coin')) {
+                    coins++; playSfx(1000, 'sine', 0.05); obj.div.remove(); objects.splice(i, 1);
+                } else if (obj.type.includes('powerup')) {
+                    if(obj.type.includes('mag')) activePowerups.mag = Date.now() + 5000;
+                    else activePowerups.shield = Date.now() + 5000;
+                    playSfx(1500, 'square', 0.2); obj.div.remove(); objects.splice(i, 1);
+                } else {
+                    if (activePowerups.shield > Date.now()) {
+                        activePowerups.shield = 0; obj.div.style.opacity = '0';
+                    } else {
+                        if (obj.type === 'barrier' && (isJumping || isRolling)) { }
+                        else if (obj.type === 'train' && isJumping) { gameOver(); }
+                        else if (!isJumping && !isRolling) { gameOver(); }
+                    }
+                }
+            }
+            if (obj.y > window.innerHeight + 100) { obj.div.remove(); objects.splice(i, 1); }
+        });
+
+        document.getElementById('score').innerText = score;
+        document.getElementById('coins').innerText = coins;
+        document.getElementById('multiplier').innerText = 'x' + mult.toFixed(1);
+        player.style.filter = activePowerups.shield > Date.now() ? 'drop-shadow(0 0 10px var(--shield))' : 'none';
+        
+        requestAnimationFrame(update);
+    }
+
+    function gameOver() {
+        isGameOver = true; playSfx(50, 'sawtooth', 0.8);
+        player.innerHTML = '💀';
+        setTimeout(() => { alert(`OYUN BİTTİ!\nEfe Skor: ${score}\nAltın: ${coins}`); location.reload(); }, 100);
+    }
+
+    spawn(); update();
+</script>
+</body>
+</html>
